@@ -24,7 +24,7 @@ const toggleLabelMind = document.getElementById("toggle-label-mind");
 
 // --- State and Config ---
 let currentQueryDrugs = [];
-const BASE_URL = "http://localhost:8000";
+const BASE_URL = process.env.PARCEL_API_ENDPOINT;
 let db;
 let currentMode = "assistant"; // 'assistant' or 'naive'
 
@@ -101,6 +101,8 @@ function applyTheme(isCalm) {
     toggleLabelMind.classList.add("font-semibold");
     addDrugBtn.style.display = "none"; // 마음상담 모드에서 약 추가 버튼 숨기기
     currentMode = "naive";
+    currentQueryDrugs = [];
+    renderDrugTags();
   } else {
     document.body.classList.remove("theme-calm");
     headerIcon.textContent = "💊";
@@ -264,13 +266,20 @@ function renderDrugTags() {
 
 // --- API & Logic Functions ---
 function getProfileContext() {
-  const age = document.getElementById("age").value;
-  const gender = document.getElementById("gender").value;
-  const conditions = document.getElementById("conditions").value;
-  const medications = document.getElementById("medications").value;
-  return `[사용자 프로필]\n- 나이: ${age}세\n- 성별: ${gender}\n- 기저질환: ${
-    conditions || "없음"
-  }\n- 현재 복용 약물: ${medications || "없음"}`;
+  const age = document.getElementById("age").value.trim();
+  const gender = document.getElementById("gender").value.trim();
+  const conditions = document.getElementById("conditions").value.trim();
+  const medications = document.getElementById("medications").value.trim();
+
+  // 모든 필드가 비어 있다면 null 반환
+  const allEmpty = !age && !gender && !conditions && !medications;
+  if (allEmpty) return "";
+
+  return `[사용자 프로필]
+        - 나이: ${age || "알 수 없음"}세
+        - 성별: ${gender || "알 수 없음"}
+        - 기저질환: ${conditions || "없음"}
+        - 현재 복용 약물: ${medications || "없음"}`;
 }
 
 async function getAssistantResponse(userMessage) {
@@ -291,21 +300,16 @@ async function getAssistantResponse(userMessage) {
       `${profileContext}\n\n${drugContext}\n\n[질문]\n${userMessage}`.trim();
 
     const thread_id = await getMetadata("assistant_thread_id");
-    payload = { message: finalMessage, thread_id: thread_id };
+    payload = { message: finalMessage };
+    if (thread_id) payload.thread_id = thread_id;
     url = `${BASE_URL}/assistant`;
+
   } else {
-    // 마음상담 로직 - 전체 메시지 히스토리를 사용하여 스레드 공유
+    // 마음상담 로직 - 스레드 유지용 전체 메시지 구성
     const allMsgs = await getAllMessages();
-    const messagesForAPI = [
-      {
-        role: "system",
-        content:
-          "당신은 사용자의 마음을 위로하고 공감해주는 따뜻한 상담사 '마음이'입니다. 사용자의 이야기에 깊이 공감하며, 안정감을 주는 말투로 대화해주세요. 모든 답변은 한국어로, 다정하게 해주세요.",
-      },
-      ...allMsgs.map((m) => ({ role: m.role, content: m.content })),
-      { role: "user", content: finalMessage },
-    ];
-    payload = { messages: messagesForAPI };
+    finalMessage = userMessage.trim(); // 누락 방지
+
+    payload = { message: finalMessage };
     url = `${BASE_URL}/chat`;
   }
 
@@ -324,15 +328,23 @@ async function getAssistantResponse(userMessage) {
 
   const data = await response.json();
 
+  let replyText = data.reply; // 기본값
+
+  // --- 마음상담일 경우 reply fallback 처리 ---
+  if (currentMode !== "assistant") {
+    replyText = data.reply || data.choices?.[0]?.message?.content || "답변을 받아오지 못했습니다.";
+  }
+
   if (currentMode === "assistant" && data.thread_id) {
     await saveMetadata("assistant_thread_id", data.thread_id);
   }
 
   await saveMessage("user", userMessage);
-  await saveMessage("assistant", data.reply);
+  await saveMessage("assistant", replyText);
 
-  return data.reply;
+  return replyText;
 }
+
 
 function searchDrugs(term) {
   const mockResults = [
@@ -402,25 +414,25 @@ function searchDrugs(term) {
 }
 
 async function loadChatHistory() {
-  const allMsgs = await getAllMessages();
+  const allMsgs = await getAllMessages();  // 비동기 IndexedDB 버전
   chatMessages.innerHTML = "";
 
-  if (allMsgs.length === 0) {
-    // 처음에만 welcome 메시지
-    const welcomeMsg = "안녕하세요! 궁금한 점을 입력해 주세요.";
+  const welcomeMsg = "안녕하세요! 궁금한 점을 입력해 주세요. 친절하게 답변드리겠습니다.";
+
+  if (!Array.isArray(allMsgs) || allMsgs.length === 0) {
     chatMessages.appendChild(
       createMessageBubble(welcomeMsg, "assistant", new Date())
     );
   } else {
     for (const msg of allMsgs) {
       chatMessages.appendChild(
-        createMessageBubble(msg.content, msg.role, msg.timestamp)
+        createMessageBubble(msg.content, msg.role, new Date(msg.timestamp))
       );
     }
   }
+
   scrollToBottom();
 }
-
 // --- Event Listeners ---
 messageForm.addEventListener("submit", async (e) => {
   e.preventDefault();
