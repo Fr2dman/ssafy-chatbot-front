@@ -227,8 +227,7 @@ function createLoadingBubble() {
     "text-lg",
     "text-white"
   );
-  avatar.textContent = "🤖";
-
+  
   const bubble = document.createElement("div");
   bubble.classList.add(
     "p-3",
@@ -273,6 +272,7 @@ function getProfileContext() {
     conditions || "없음"
   }\n- 현재 복용 약물: ${medications || "없음"}`;
 }
+
 async function getAssistantResponse(userMessage) {
   let url;
   let payload;
@@ -294,7 +294,7 @@ async function getAssistantResponse(userMessage) {
     payload = { message: finalMessage, thread_id: thread_id };
     url = `${BASE_URL}/assistant`;
   } else {
-    // 마음상담 로직
+    // 마음상담 로직 - 전체 메시지 히스토리를 사용하여 스레드 공유
     const allMsgs = await getAllMessages();
     const messagesForAPI = [
       {
@@ -402,7 +402,7 @@ function searchDrugs(term) {
 }
 
 async function loadChatHistory() {
-  const allMsgs = await getAllMessages(); // 전체 메시지 다 보여줌
+  const allMsgs = await getAllMessages();
   chatMessages.innerHTML = "";
 
   if (allMsgs.length === 0) {
@@ -430,8 +430,9 @@ messageForm.addEventListener("submit", async (e) => {
   const fullQuestionForUI = `${currentQueryDrugs
     .map((d) => `[${d.name}]`)
     .join(" ")} ${message}`.trim();
+
   chatMessages.appendChild(
-    createMessageBubble(fullQuestionForUI, "user", new Date(), currentMode)
+    createMessageBubble(fullQuestionForUI, "user", new Date())
   );
   scrollToBottom();
 
@@ -445,7 +446,7 @@ messageForm.addEventListener("submit", async (e) => {
     const response = await getAssistantResponse(message);
     loadingBubble.remove();
     chatMessages.appendChild(
-      createMessageBubble(response, "assistant", new Date(), currentMode)
+      createMessageBubble(response, "assistant", new Date())
     );
     scrollToBottom();
   } catch (error) {
@@ -453,7 +454,7 @@ messageForm.addEventListener("submit", async (e) => {
     const errMsg = "오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
     loadingBubble.remove();
     chatMessages.appendChild(
-      createMessageBubble(errMsg, "assistant", new Date(), currentMode)
+      createMessageBubble(errMsg, "assistant", new Date())
     );
     scrollToBottom();
   } finally {
@@ -462,46 +463,20 @@ messageForm.addEventListener("submit", async (e) => {
   }
 });
 
+// 수정된 부분: 모드 변경 시 메시지를 지우지 않고 테마와 안내만 변경
 themeToggle.addEventListener("change", (e) => {
   const isCalm = e.target.checked;
   applyTheme(isCalm);
   localStorage.setItem("chatTheme", isCalm ? "calm" : "default");
-  updateModeNotice(); // ← 추가!
-  chatMessages.innerHTML = "";
-  userInput.value = "";
-  loadChatHistory();
+  updateModeNotice(); // 안내 메시지만 업데이트
+  // chatMessages.innerHTML = ""; 제거 - 메시지 유지
+  // loadChatHistory(); 제거 - 메시지 유지
 });
 
 newChatBtn.addEventListener("click", async () => {
-  if (
-    confirm(
-      "모든 대화 기록을 지우고 새로 시작하시겠습니까? (현재 모드의 기록만 삭제됩니다)"
-    )
-  ) {
-    const allMessages = await getAllMessages();
-    const otherMessages = allMessages.filter((m) => m.mode !== currentMode);
-
-    await clearAllData();
-
-    // 다른 모드 메시지 다시 저장
-    const tx = db.transaction("chats", "readwrite");
-    const store = tx.objectStore("chats");
-    otherMessages.forEach((msg) => store.add(msg));
-
-    // 메타데이터는 모드별로 관리
-    if (currentMode === "assistant") {
-      await saveMetadata(
-        "naive_thread_id",
-        await getMetadata("naive_thread_id")
-      );
-    } else {
-      await saveMetadata(
-        "assistant_thread_id",
-        await getMetadata("assistant_thread_id")
-      );
-    }
-
-    await loadChatHistory();
+  if (confirm("모든 대화 기록을 지우고 새로 시작하시겠습니까?")) {
+    await clearAllData();      // 전체 기록 완전 삭제
+    await loadChatHistory();   // 환영 메시지 출력
   }
 });
 
@@ -548,6 +523,15 @@ saveProfileBtn.addEventListener("click", () => {
   }, 2000);
 });
 
+// 약물 태그 삭제 이벤트 리스너 추가
+drugTagsContainer.addEventListener("click", (e) => {
+  if (e.target.tagName === "BUTTON") {
+    const index = parseInt(e.target.dataset.index);
+    currentQueryDrugs.splice(index, 1);
+    renderDrugTags();
+  }
+});
+
 // --- Initialization ---
 async function initializeApp() {
   await initDB();
@@ -555,7 +539,7 @@ async function initializeApp() {
   const isCalm = savedTheme === "calm";
   themeToggle.checked = isCalm;
   applyTheme(isCalm);
-  updateModeNotice(); // ← 추가!
+  updateModeNotice();
   await loadChatHistory();
 }
 
