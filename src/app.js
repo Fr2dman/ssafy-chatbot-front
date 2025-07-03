@@ -306,8 +306,12 @@ async function getAssistantResponse(userMessage) {
 
   } else {
     // 마음상담 로직 - 스레드 유지용 전체 메시지 구성
-    const allMsgs = await getAllMessages();
+    const profileContext = getProfileContext();  // ✅ 사용자 프로필 추가
+    // const allMsgs = await getAllMessages();
     finalMessage = userMessage.trim(); // 누락 방지
+
+    finalMessage =
+    `${profileContext}\n\n[사용자 메시지]\n${finalMessage}`.trim();  // ✅ 최종 메시지 구성
 
     payload = { message: finalMessage };
     url = `${BASE_URL}/chat`;
